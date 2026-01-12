@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ミニ計算アプリ</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+    }
+    input, button, select {
+      padding: 6px;
+      margin: 4px 0;
+    }
+  </style>
+</head>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<body>
+<h1>損益分岐点売上高計算ツール</h1>
+<p>固定費と変動費率から、損益分岐点売上高を算出します。</p>
+
+<p>
+  固定費（円）：
+  <input id="fixedCost" type="number" value="3000000" />
+</p>
+
+<p>
+  入力する指標：
+  <label><input type="radio" name="mode" value="var" checked> 変動費率（％）</label>
+  <label><input type="radio" name="mode" value="cm"> 限界利益率（％）</label>
+</p>
+
+<p>
+  率（％）：
+  <input id="rate" type="number" step="0.1" value="60" />
+</p>
+
+
+<button id="calcBtn">計算する</button>
+
+<button id="saveBtn">保存</button>
+<button id="clearBtn">保存を消す</button>
+
+
+<h2>結果</h2>
+<p id="result">ここに結果が出ます</p>
+
+<h2>グラフ</h2>
+<canvas id="chart" width="600" height="320"></canvas>
+
+
+
+
+<script>
+  const fixedCostEl = document.getElementById("fixedCost");
+  const rateEl = document.getElementById("rate");
+  const resultEl = document.getElementById("result");
+  const btn = document.getElementById("calcBtn");
+  const saveBtn = document.getElementById("saveBtn");
+  const clearBtn = document.getElementById("clearBtn");
+
+  const canvas = document.getElementById("chart");
+  let chart; // グラフを保持
+
+  const STORAGE_KEY = "be_tool_settings_v1";
+
+function saveSettings() {
+  const mode = getSelectedMode();
+  const settings = {
+    fixedCost: fixedCostEl.value,
+    rate: rateEl.value,
+    mode,
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+}
+
+function loadSettings() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const settings = JSON.parse(raw);
+    if (settings.fixedCost != null) fixedCostEl.value = settings.fixedCost;
+    if (settings.rate != null) rateEl.value = settings.rate;
+
+    if (settings.mode === "cm") {
+      document.querySelector('input[name="mode"][value="cm"]').checked = true;
+    } else {
+      document.querySelector('input[name="mode"][value="var"]').checked = true;
+    }
+  } catch {
+    // 壊れてたら無視
+  }
+}
+
+function clearSettings() {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+
+  function getSelectedMode() {
+    const checked = document.querySelector('input[name="mode"]:checked');
+    return checked ? checked.value : "var";
+  }
+
+  function buildDenominator(ratePercent, mode) {
+    const r = ratePercent / 100;
+    return (mode === "var") ? (1 - r) : r; // (1-変動費率) or 限界利益率
+  }
+
+  function makeSeries(fixedCost, denom, maxSales) {
+    const labels = [];
+    const profit = [];
+    const sales = [];
+
+    const steps = 20; // 点の数（増やすと滑らか）
+    for (let i = 0; i <= steps; i++) {
+      const s = Math.round((maxSales * i) / steps);
+      const p = Math.round(s * denom - fixedCost); // 利益 = 売上×限界利益率 - 固定費
+      labels.push(s.toLocaleString());
+      sales.push(s);
+      profit.push(p);
+    }
+    return { labels, profit, sales };
+  }
+
+  function drawChart(labels, profit) {
+    if (chart) chart.destroy();
+
+    chart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "利益（円）",
+            data: profit,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true },
+        },
+        scales: {
+          y: {
+            ticks: {
+              callback: (v) => Number(v).toLocaleString(),
+            },
+          },
+        },
+      },
+    });
+  }
+
+  loadSettings();
+
+  btn.addEventListener("click", () => {
+    const fixedCost = Number(fixedCostEl.value);
+    const ratePercent = Number(rateEl.value);
+    const mode = getSelectedMode();
+    saveSettings(); 
+
+
+    if (!Number.isFinite(fixedCost) || fixedCost < 0) {
+      resultEl.textContent = "固定費は0以上の数値で入力してください。";
+      return;
+    }
+    if (!Number.isFinite(ratePercent) || ratePercent <= 0 || ratePercent >= 100) {
+      resultEl.textContent = "率は0より大きく100未満で入力してください。";
+      return;
+    }
+
+    const denom = buildDenominator(ratePercent, mode);
+    if (denom <= 0) {
+      resultEl.textContent = "率が高すぎて計算できません。";
+      return;
+    }
+
+    const saveBtn = document.getElementById("saveBtn");
+const clearBtn = document.getElementById("clearBtn");
+
+saveBtn.addEventListener("click", () => {
+  saveSettings();
+  resultEl.textContent = "保存しました（次回アクセス時に復元されます）";
+});
+
+clearBtn.addEventListener("click", () => {
+  clearSettings();
+  resultEl.textContent = "保存を消しました";
+});
+
+  window.addEventListener("DOMContentLoaded", () => {
+    loadSettings();
+
+    const breakEvenSales = fixedCost / denom;
+
+    // グラフは損益分岐点の2倍まで表示（目安）
+    const maxSales = Math.round(breakEvenSales * 2);
+
+    const { labels, profit } = makeSeries(fixedCost, denom, maxSales);
+    drawChart(labels, profit);
+
+    const modeLabel = (mode === "var") ? "変動費率" : "限界利益率";
+    resultEl.textContent =
+      `損益分岐点売上高：${Math.round(breakEvenSales).toLocaleString()} 円（${modeLabel}：${ratePercent}%）`;
+  });
+</script>
+
+
+
+
+
+</body>
+</html>
