@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>シナリオ比較（CSVアップロード → 表 + グラフ）</title>
+
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 32px auto; padding: 0 12px; }
+    h1 { margin-bottom: 8px; }
+    .note { font-size: 12px; opacity: 0.8; margin: 6px 0 14px; }
+    #status { font-weight: bold; margin: 10px 0; }
+
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { text-align: left; background: #f7f7f7; }
+
+    .block { margin: 14px 0; }
+  </style>
+</head>
+
+<body>
+  <h1>シナリオ比較（Python CSV → Web可視化）</h1>
+  <p class="note">Pythonで作成した <code>scenario_compare.csv</code> を選択すると、表とグラフを表示します（サーバ不要）。</p>
+
+  <div class="block">
+    <input type="file" id="fileInput" accept=".csv" />
+    <p id="status">CSVを選択してください</p>
+  </div>
+
+  <table id="tbl"></table>
+
+  <h2>必要売上（円）</h2>
+  <canvas id="chart" width="800" height="360"></canvas>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const tbl = document.getElementById("tbl");
+    const fileInput = document.getElementById("fileInput");
+    const canvas = document.getElementById("chart");
+
+    let chart;
+
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/);
+
+      return lines.map((line, i) => {
+        const cols = line.split(",");
+
+        // 先頭セルのBOM除去（utf-8-sig対策）
+        if (i === 0 && cols.length > 0) {
+          cols[0] = cols[0].replace(/^\uFEFF/, "");
+        }
+        return cols;
+      });
+    }
+
+    function renderTable(rows) {
+      tbl.innerHTML = "";
+      if (!rows || rows.length === 0) return;
+
+      const thead = document.createElement("thead");
+      const trh = document.createElement("tr");
+
+      rows[0].forEach(h => {
+        const th = document.createElement("th");
+        th.textContent = h;
+        trh.appendChild(th);
+      });
+
+      thead.appendChild(trh);
+      tbl.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      rows.slice(1).forEach(r => {
+        const tr = document.createElement("tr");
+        r.forEach(c => {
+          const td = document.createElement("td");
+          td.textContent = c;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+
+      tbl.appendChild(tbody);
+    }
+
+    function drawChartFromRows(rows) {
+      if (!rows || rows.length < 2) {
+        statusEl.textContent = "データ行がありません";
+        return;
+      }
+
+      const header = rows[0];
+      const idxScenario = header.indexOf("シナリオ");
+      const idxRequired = header.indexOf("必要売上高（円）");
+
+      if (idxScenario === -1 || idxRequired === -1) {
+        statusEl.textContent =
+          "CSVの列名が想定と違います（必要: シナリオ / 必要売上高（円））";
+        return;
+      }
+
+      const labels = [];
+      const data = [];
+
+      rows.slice(1).forEach(r => {
+        const name = r[idxScenario];
+        const required = Number(String(r[idxRequired]).replace(/,/g, ""));
+
+        if (!name || !Number.isFinite(required)) return;
+
+        labels.push(name);
+        data.push(required);
+      });
+
+      if (chart) chart.destroy();
+
+      chart = new Chart(canvas, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            { label: "必要売上高（円）", data }
+          ]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: {
+              ticks: {
+                callback: (v) => Number(v).toLocaleString()
+              }
+            }
+          }
+        }
+      });
+    }
+
+    fileInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const text = reader.result;
+
+          const rows = parseCSV(text);
+          renderTable(rows);
+          drawChartFromRows(rows);
+
+          statusEl.textContent = "ファイル読み込み成功 ✅";
+        } catch (err) {
+          statusEl.textContent = "読み込み失敗 ❌：" + err.message;
+        }
+      };
+
+      // Python側が utf-8-sig（BOM付き）でもOK（parseCSVでBOM除去）
+      reader.readAsText(file, "utf-8");
+    });
+  </script>
+</body>
+</html>
